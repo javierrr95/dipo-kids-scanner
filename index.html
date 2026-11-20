@@ -38,7 +38,62 @@ function showTab(t){document.getElementById('scanPanel').classList.toggle('hidde
 function msg(t,kind){const e=document.getElementById('status');e.textContent=t;e.className='status '+(kind||'');}
 function config(){const url=document.getElementById('apiUrl').value.trim();const key=document.getElementById('apiKey').value.trim();if(!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url))throw new Error('Masukkan URL Web App Google Apps Script yang berakhiran /exec.');if(!key)throw new Error('Masukkan PIN scanner.');return {url,key};}
 function jsonp(params){return new Promise((resolve,reject)=>{let cb='dipoCb_'+Date.now()+'_'+Math.floor(Math.random()*100000);let script=document.createElement('script');let timer=setTimeout(()=>{cleanup();reject(new Error('Server tidak merespons. Periksa koneksi dan URL API.'));},18000);function cleanup(){clearTimeout(timer);delete window[cb];script.remove();}window[cb]=data=>{cleanup();resolve(data);};params.callback=cb;let q=Object.keys(params).map(k=>encodeURIComponent(k)+'='+encodeURIComponent(params[k])).join('&');script.onerror=()=>{cleanup();reject(new Error('Gagal menghubungi Google Apps Script. Periksa deployment Web App.'));};script.src=config().url+'?'+q;document.body.appendChild(script);});}
-async function startScanner(){try{config();if(!window.Html5Qrcode)throw new Error('Library QR scanner belum termuat. Periksa koneksi internet.');if(qrScanner&&qrScanner.isScanning)return;if(!qrScanner)qrScanner=new Html5Qrcode('reader');await qrScanner.start({facingMode:'environment'},{fps:10,qrbox:{width:230,height:230}},onScan,()=>{});msg('Kamera aktif. Arahkan ke QR Code anak.','good');}catch(e){msg(e.message||String(e),'bad');}}
+
+async function startScanner() {
+  try {
+    config();
+
+    if (!window.Html5Qrcode) {
+      throw new Error("Library QR scanner belum termuat.");
+    }
+
+    if (qrScanner && qrScanner.isScanning) return;
+
+    msg("Memeriksa perangkat kamera...", "");
+
+    // Deteksi kamera yang tersedia
+    const cameras = await Html5Qrcode.getCameras();
+
+    if (!cameras || cameras.length === 0) {
+      throw new Error("Tidak ditemukan kamera yang tersedia.");
+    }
+
+    // Prioritaskan kamera belakang berdasarkan label perangkat
+    const backCamera = cameras.find(camera =>
+      /back|rear|environment|belakang/i.test(camera.label)
+    );
+
+    const selectedCamera = backCamera || cameras[cameras.length - 1];
+
+    msg("Mengaktifkan kamera: " + selectedCamera.label, "");
+
+    if (!qrScanner) {
+      qrScanner = new Html5Qrcode("reader");
+    }
+
+    await qrScanner.start(
+      selectedCamera.id,
+      {
+        fps: 10,
+        qrbox: { width: 230, height: 230 }
+      },
+      onScan,
+      () => {}
+    );
+
+    msg("Kamera aktif. Arahkan ke QR Code anak.", "good");
+
+  } catch (e) {
+    console.error("Scanner error:", e);
+
+    msg(
+      "Gagal mengaktifkan kamera: " +
+      (e.message || String(e)),
+      "bad"
+    );
+  }
+}
+
 async function stopScanner(){if(qrScanner&&qrScanner.isScanning){try{await qrScanner.stop();msg('Kamera dihentikan.');}catch(e){msg('Tidak dapat menghentikan kamera: '+e,'bad');}}}
 async function onScan(token){if(locked)return;locked=true;try{const c=config();const r=await jsonp({action:'record',key:c.key,token:token,type:document.getElementById('type').value,session:document.getElementById('session').value,attendant:document.getElementById('attendant').value});msg(r.message||'Transaksi selesai.',r.ok?'good':'bad');}catch(e){msg(e.message||String(e),'bad');}finally{setTimeout(()=>locked=false,1800);}}
 async function loadDashboard(){try{const c=config();const d=await jsonp({action:'dashboard',key:c.key});if(d.ok===false)throw new Error(d.message);document.getElementById('dashDate').textContent=d.date;[['total',d.total],['ins',d.checkedIn],['outs',d.checkedOut],['inside',d.stillPresent],['absent',d.absent],['rate',d.rate+'%']].forEach(x=>document.getElementById(x[0]).textContent=x[1]);document.getElementById('grades').innerHTML=d.byGrade.length?'<table><tr><th>Kelas</th><th>Check-in</th></tr>'+d.byGrade.map(x=>'<tr><td>'+esc(x.grade)+'</td><td>'+x.count+'</td></tr>').join('')+'</table>':'<p class="muted">Belum ada data.</p>';document.getElementById('recent').innerHTML=d.recent.length?'<table><tr><th>Nama</th><th>Kelas</th><th>Jenis</th><th>Jam</th></tr>'+d.recent.map(x=>'<tr><td>'+esc(x.name)+'</td><td>'+esc(x.grade)+'</td><td>'+esc(x.type)+'</td><td>'+esc(x.time)+'</td></tr>').join('')+'</table>':'<p class="muted">Belum ada absensi.</p>';}catch(e){document.getElementById('dashDate').textContent=e.message||String(e);}}
